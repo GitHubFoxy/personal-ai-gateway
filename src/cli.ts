@@ -4,6 +4,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { checkEndpoint, configPath, home, initialize, loadConfig, loadSecrets, saveJson, secretsPath, type Account, type Config, type Family, type Target } from "./config.ts";
 import { startGateway } from "./gateway.ts";
+import { loginChatGPT } from "./siwc.ts";
 
 const [command, ...args] = process.argv.slice(2);
 const help = `Personal AI Gateway (PAG)
@@ -13,7 +14,7 @@ const help = `Personal AI Gateway (PAG)
   pag auth add NAME --kind llm|decisions --base-url URL [--session opencode] [--paid] [--key-stdin]
   pag auth list
   pag auth remove NAME
-  pag auth login openai           (not available until approved OAuth app flow)
+  pag auth login openai           (official ChatGPT open-source OAuth flow)
   pag route set ALIAS llm|decisions ACCOUNT:MODEL [ACCOUNT:MODEL...]
   pag route promote ALIAS ACCOUNT:MODEL
   pag route fallback ALIAS on|off
@@ -57,8 +58,8 @@ async function main() {
   if (command === "serve") return startGateway();
   if (command === "auth") {
     const [action, name] = args;
-    if (action === "login" && name === "openai") throw new Error("ChatGPT subscription OAuth is not yet implemented. Use the supported official Sign in with ChatGPT flow when registered, not an unofficial token workaround.");
-    if (action === "list") { console.log(JSON.stringify(Object.entries(loadConfig().accounts).map(([id, a]) => ({ id, kind: a.kind, baseUrl: a.baseUrl, configured: !!loadSecrets().accounts[id] })), null, 2)); return; }
+    if (action === "login" && name === "openai") { await loginChatGPT(); return; }
+    if (action === "list") { console.log(JSON.stringify(Object.entries(loadConfig().accounts).map(([id, a]) => ({ id, kind: a.kind, baseUrl: a.baseUrl, configured: !!(loadSecrets().accounts[id] || loadSecrets().oauth?.[id]) })), null, 2)); return; }
     if (action === "add") {
       const id = requireArg(name, "Missing account name");
       if (!/^[a-z0-9][a-z0-9_-]{0,40}$/i.test(id)) throw new Error("Invalid account name");
@@ -84,7 +85,7 @@ async function main() {
     if (action === "remove") {
       const id = requireArg(name, "Missing account name");
       const config = loadConfig(), secrets = loadSecrets();
-      delete config.accounts[id]; delete secrets.accounts[id];
+      delete config.accounts[id]; delete secrets.accounts[id]; if (secrets.oauth) delete secrets.oauth[id];
       saveJson(secretsPath(), secrets); writeConfig(config);
       console.log("Removed " + id); return;
     }
@@ -124,10 +125,10 @@ async function main() {
     const problems: string[] = [];
     for (const [name, route] of Object.entries(config.routes)) {
       if (!route.targets.length) problems.push(name + ": no targets");
-      for (const t of route.targets) if (!config.accounts[t.account] || !secrets.accounts[t.account]) problems.push(name + ": missing credentials or account " + t.account);
+      for (const t of route.targets) if (!config.accounts[t.account] || !(secrets.accounts[t.account] || secrets.oauth?.[t.account])) problems.push(name + ": missing credentials or account " + t.account);
     }
     const result = { config: configPath(), accounts: Object.keys(config.accounts), aliases: Object.keys(config.routes),
-      configured: Object.keys(secrets.accounts).length, health: problems.length ? "configuration_incomplete" : "configured_not_probed", problems,
+      configured: Object.keys(secrets.accounts).length + Object.keys(secrets.oauth ?? {}).length, health: problems.length ? "configuration_incomplete" : "configured_not_probed", problems,
       note: "Quota status is unknown until an actual request; no billable inference was used." };
     console.log(JSON.stringify(result, null, 2));
     if (command === "doctor" && problems.length) process.exitCode = 1;
