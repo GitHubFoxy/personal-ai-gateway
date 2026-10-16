@@ -2,13 +2,13 @@
 
 Minimal, self-hosted **AI API router**: one gateway URL, one API key, stable virtual model aliases, ordered provider fallback, CLI configuration. TypeScript + Node.js 22.16+ with **zero production dependencies**. No dashboard, database, or LiteLLM.
 
-**Implementation:** `src/`; [quick start](docs/quickstart.md); [project roadmap](PLAN.md).
+**Implementation:** `src/`; [quick start](docs/quickstart.md); [Decisions API setup](docs/decisions.md); [project roadmap](PLAN.md).
 
 ### Features (v0.1)
 
 - `POST /v1/responses` — forwards OpenAI Responses-compatible requests to a compatible model pool.
 - `POST /v1/chat/completions` — forwards compatible chat completions requests.
-- `POST /v1/decisions` — System One-style typed `predicate`, `choice`, `score` decisions.
+- `POST /v1/decisions` — accepts both System One `state + questions{}` and OpenAI-native `input + questions[]`; translates and validates provider responses.
 - `GET /v1/models` — configured virtual aliases.
 - Ordered fallback on 429, 5xx, network failures, cooldown and bounded timeout.
 - SSE streaming pass-through (fallback **before** response begins only), preservation of tool payloads.

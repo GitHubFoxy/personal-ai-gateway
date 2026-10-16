@@ -11,7 +11,7 @@ const help = `Personal AI Gateway (PAG)
 
   pag init
   pag serve
-  pag auth add NAME --kind llm|decisions --base-url URL [--session opencode] [--paid] [--key-stdin]
+  pag auth add NAME --kind llm|decisions --base-url URL [--decisions-url URL] [--protocol systemone|openai] [--session opencode] [--paid] [--key-stdin]
   pag auth models chatgpt           (list authorized ChatGPT model slugs)
   pag auth list
   pag auth remove NAME
@@ -82,10 +82,15 @@ async function main() {
       const decisionUrl = option("--decisions-url");
       if (!baseUrl && !decisionUrl) throw new Error("Pass --base-url or --decisions-url");
       const endpoints = decisionUrl ? { decisions: decisionUrl } : undefined;
+      const protocol = option("--protocol") ?? "systemone";
+      if (kind === "decisions" && !["systemone", "openai"].includes(protocol)) throw new Error("Decision protocol must be systemone or openai");
+      if (kind !== "decisions" && args.includes("--protocol")) throw new Error("--protocol is only valid for decision accounts");
       checkEndpoint(decisionUrl || baseUrl);
+      if (baseUrl) checkEndpoint(baseUrl);
       const key = await readKey();
       const config = loadConfig(), secrets = loadSecrets();
       const account: Account = { kind, baseUrl, ...(endpoints ? { endpoints } : {}),
+        ...(kind === "decisions" ? { protocol: protocol as "systemone" | "openai" } : {}),
         ...(args.includes("--paid") ? { paid: true } : {}),
         ...(option("--session") === "opencode" || id === "opencode-go" ? { session: "opencode" } as const : {}) };
       config.accounts[id] = account;

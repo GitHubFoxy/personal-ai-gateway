@@ -8,7 +8,7 @@ export type Endpoint = "responses" | "chat" | "decisions";
 export type Account = {
   kind: Family;
   baseUrl: string;
-  protocol?: "systemone";
+  protocol?: "systemone" | "openai";
   endpoints?: Partial<Record<Endpoint, string>>;
   paid?: boolean;
   session?: "opencode";

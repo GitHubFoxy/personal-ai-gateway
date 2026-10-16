@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { loadConfig, loadSecrets, verifyKey, checkEndpoint, type Account, type Alias, type Config, type Endpoint, type Target } from "./config.ts";
-import { normalizeDecisions, parseDecision, toSystemOne } from "./decisions.ts";
+import { canTranslate, normalizeDecisions, parseDecision, toProviderDecision } from "./decisions.ts";
 import { getOAuthToken } from "./siwc.ts";
 
 type Fetcher = typeof fetch;
@@ -114,6 +114,7 @@ export function createGateway(options: { fetcher?: Fetcher; config?: () => Confi
         const routeId = target.account + ":" + target.model + ":" + endpoint;
         if ((cooldown.get(routeId) ?? 0) > Date.now()) continue;
         const account = cfg.accounts[target.account];
+        if (endpoint === "decisions" && !canTranslate(decisions!, account.protocol ?? "systemone")) continue;
         let token = secrets.accounts[target.account];
         if (account.auth === "chatgpt-oauth") {
           // Official ChatGPT subscription grants only support streamed, unstored Responses.
@@ -126,7 +127,7 @@ export function createGateway(options: { fetcher?: Fetcher; config?: () => Confi
         attempts++;
         let response: Response;
         try {
-          const outbound = endpoint === "decisions" ? toSystemOne(decisions!, target.model) :
+          const outbound = endpoint === "decisions" ? toProviderDecision(decisions!, target.model, account.protocol ?? "systemone") :
             account.auth === "chatgpt-oauth" ? { ...body, model: target.model, store: false, stream: true } : { ...body, model: target.model };
           response = await fetcher(url, {
             method: "POST",
