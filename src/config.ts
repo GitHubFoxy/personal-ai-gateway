@@ -12,6 +12,7 @@ export type Account = {
   endpoints?: Partial<Record<Endpoint, string>>;
   paid?: boolean;
   session?: "opencode";
+  auth?: "chatgpt-oauth";
 };
 export type Target = { account: string; model: string };
 export type Alias = { type: Family; targets: Target[]; fallback?: boolean };
@@ -22,7 +23,14 @@ export type Config = {
   routes: Record<string, Alias>;
   fallback: { enabled: boolean; maxAttempts: number; cooldownMs: number; timeoutMs: number; allowPaid: boolean };
 };
-export type Secrets = { gatewayKey: string; accounts: Record<string, string> };
+export type OAuthCredentials = {
+  clientId: string; accessToken: string; refreshToken: string;
+  idToken: string; expiresAt: number; subject: string; scope: string;
+};
+export type Secrets = {
+  gatewayKey: string; accounts: Record<string, string>;
+  oauth?: Record<string, OAuthCredentials>; hostId?: string;
+};
 
 export const home = () => process.env.PAG_HOME || join(homedir(), ".config", "pag");
 export const configPath = () => join(home(), "config.json");
