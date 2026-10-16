@@ -126,3 +126,23 @@ test("retryable routes exhausted and disabled paid routes", async () => {
     assert.equal(r.status, 503);
   });
 });
+
+test("ChatGPT early streamed quota event falls back before data is emitted", async () => {
+  const cfg = config(); let calls = 0;
+  await run(cfg, async (_url, init) => {
+    calls++;
+    if (calls === 1) return new Response('event: response.failed\\ndata: {"type":"response.failed","response":{"error":{"code":"subscription_sharing_usage_limit_exceeded"}}}\\n\\n', {
+      status: 200, headers: { "content-type": "text/event-stream" }
+    });
+    assert.equal(JSON.parse(String(init?.body)).model, cfg.routes.coding.targets[1].model);
+    return new Response('data: {"type":"response.completed"}\\n\\n', {
+      status: 200, headers: { "content-type": "text/event-stream" }
+    });
+  }, async url => {
+    const response = await post(url, "/v1/responses", { model: "coding", input: "Hi", stream: true });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-pag-provider"), "b");
+    assert.match(await response.text(), /response.completed/);
+    assert.equal(calls, 2);
+  });
+});
