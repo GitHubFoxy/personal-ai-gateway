@@ -28,6 +28,21 @@ curl http://127.0.0.1:4000/v1/responses \
 
 PAG maps the stable alias `coding` to the configured provider/model. Clients do not need to change keys or model names when the route is reordered.
 
+## ChatGPT Plus / Pro via official Sign in with ChatGPT
+
+PAG supports the documented open-source OAuth registration and token refresh flow (not ChatGPT web cookies). This is an **interactive** login; open the browser on the same machine where the CLI runs. Actual eligibility, consent and model access are decided by OpenAI.
+
+~~~bash
+npm run pag -- auth login openai
+npm run pag -- auth models chatgpt
+# Replace <model-from-account-catalog> with an actual slug listed above.
+npm run pag -- route set coding llm chatgpt:<model-from-account-catalog> opencode-go:gpt-6-luna
+~~~
+
+For requests that may route through the ChatGPT subscription, clients **must use POST /v1/responses with `stream:true` and `store:false`**. This is the official plan-usage contract. Non-streaming and Chat Completions requests are routed only to other compatible accounts. PAG does not bypass per-plan/app limits. OAuth refresh tokens are stored in the local mode-0600 credential file; never copy it into a public repository. See [OpenAI's official OSS instructions](https://developers.openai.com/siwc/token-sharing-open-source).
+
+**Limitation:** fallback works before a streamed response starts, not as an invisible continuation of an already emitted stream. Some ChatGPT quota errors may arrive as an SSE failure event after a stream starts; in that case PAG cannot safely replay that stream to another model. Check `response.failed` and retry as a fresh request if appropriate.
+
 ## Add a fallback
 
 ~~~bash
@@ -62,7 +77,7 @@ Decision models use System One-style `state` + `questions`. PAG translates publi
 - The app exposes `/v1/responses`, `/v1/chat/completions`, `/v1/decisions`, `/v1/models` and `/healthz`. Existing OpenAI-compatible clients can use the PAG base URL with documented endpoint restrictions.
 - Model pool is ordered. Fallback occurs on upstream 429, transient 5xx, pre-response network errors or invalid nonstream JSON. It cannot resume an interrupted stream.
 - Provider quotas are not probed proactively; `status` shows configuration, not an invented token balance. Cooldowns are per-process and not durable. No usage billing/quota database.
-- No ChatGPT Plus OAuth is implemented in v0.1. It requires approved official Sign in with ChatGPT client registration and permitted Responses API scopes; subscriber cookies or undocumented endpoints are not acceptable alternatives.
+- ChatGPT OAuth uses the official open-source dynamic-client PKCE login. The user must authorize plan usage, and the account must be eligible; live sign-in has not been validated in automated CI. Subscription traffic is restricted to streamed, unstored Responses.
 - API-key providers work today; no provider calls are included in CI. This is not a general-purpose multi-user public gateway.
 - Use localhost by default; if exposed remotely, terminate HTTPS at a trusted reverse proxy, secure PAG_HOME and keep the gateway API key private.
 - YAML, UI, video/audio/images, and model-protocol translation are intentionally deferred.
