@@ -15,6 +15,13 @@ function error(res: ServerResponse, code: number, message: string, id: string): 
   json(res, code, { error: { code: code === 504 ? "timeout" : code === 429 ? "rate_limit" : code === 401 ? "unauthorized" : code === 503 ? "unavailable" : code === 502 ? "upstream_error" : "bad_request", message, request_id: id } });
 }
 async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const declaredLength = Number(req.headers["content-length"] ?? 0);
+  if (declaredLength > maxBodyBytes) {
+    req.resume(); // Drain oversized request instead of destroying the connection.
+    const err = new Error("Request body exceeds 2 MiB") as Error & { status?: number };
+    err.status = 413;
+    throw err;
+  }
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
