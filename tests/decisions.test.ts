@@ -87,7 +87,7 @@ test("OpenAI native input maps to System One for compatible fallback", () => {
   const request = parseDecision(input);
   const system = toSystemOne(request, "typesafe/jev-1.13");
   assert.equal(system.state, input.input);
-  assert.deepEqual((system.questions as Record<string, any>).team.criteria, { billing: "Payments", technical: "Software" });
+  assert.deepEqual({ ...(system.questions as Record<string, any>).team.criteria }, { billing: "Payments", technical: "Software" });
 });
 test("normalize named OpenAI arrays into System One response retaining true distributions", () => {
   const normalized = normalizeDecisions(nativeAnswers, parseDecision(systemRequest()), "decision");
@@ -126,7 +126,7 @@ test("refusal and absent probability metadata never become fabricated answers", 
     team: { type: "choice", instructions: "?", choices: { a: "A", b: "B" } }
   } });
   const output = normalizeDecisions({ answers: { yes: { type: "refusal" }, team: { choice: "b" } } }, req, "decision");
-  assert.deepEqual(output.answers, { yes: { type: "refusal" }, team: { type: "choice", choice: "b" } });
+  assert.deepEqual({ ...output.answers as Record<string, unknown> }, { yes: { type: "refusal" }, team: { type: "choice", choice: "b" } });
 });
 test("reject duplicate names, prototype keys, unrecognized choice and invalid distributions", () => {
   assert.throws(() => parseDecision({ model: "decision", state: "s", questions: {
