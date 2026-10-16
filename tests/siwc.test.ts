@@ -1,10 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initialize, loadSecrets, saveJson, secretsPath } from "../src/config.ts";
-import { getOAuthToken } from "../src/siwc.ts";
+import { getOAuthToken, verifiedIdentity } from "../src/siwc.ts";
+
+test("OAuth ID-token validation accepts an audience array containing the issued client ID", () => {
+  const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const clientId = "oaiapp_example";
+  const nonce = "nonce-example";
+  const header = Buffer.from(JSON.stringify({ alg: "RS256", kid: "test-key" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({
+    iss: "https://auth.openai.com", aud: ["another-audience", clientId], azp: clientId,
+    nonce, exp: Math.floor(Date.now() / 1000) + 60, iat: Math.floor(Date.now() / 1000), sub: "subject-example"
+  })).toString("base64url");
+  const signingInput = header + "." + payload;
+  const signature = sign("RSA-SHA256", Buffer.from(signingInput), privateKey).toString("base64url");
+  const jwk = publicKey.export({ format: "jwk" });
+  assert.equal(verifiedIdentity(signingInput + "." + signature, clientId, nonce, { keys: [{ ...jwk, kid: "test-key", alg: "RS256" }] }), "subject-example");
+});
 
 test("OAuth refresh uses issued client ID, rotates token and persists it safely", async () => {
   const previous = process.env.PAG_HOME;

@@ -1,6 +1,5 @@
 #!/usr/bin/env -S node --experimental-strip-types
 import { readFileSync, existsSync } from "node:fs";
-import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { checkEndpoint, configPath, home, initialize, loadConfig, loadSecrets, saveJson, secretsPath, type Account, type Config, type Family, type Target } from "./config.ts";
 import { startGateway } from "./gateway.ts";
@@ -11,8 +10,11 @@ const help = `Personal AI Gateway (PAG)
 
   pag init
   pag serve
+  pag auth add gemini                 (paste API key, then press Enter)
+  pag auth add vercel                 (Vercel AI Gateway)
+  pag auth add vercel-decisions --kind decisions (Vercel Decisions API)
   pag auth add NAME --kind llm|decisions --base-url URL [--decisions-url URL] [--protocol systemone|openai] [--session opencode] [--paid] [--key-stdin]
-  pag auth models chatgpt           (list authorized ChatGPT model slugs)
+  pag auth models ACCOUNT          (list provider models, when supported)
   pag auth list
   pag auth remove NAME
   pag auth login openai           (official ChatGPT open-source OAuth flow)
@@ -31,16 +33,38 @@ function option(name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
 }
-async function readKey(): Promise<string> {
+async function readKey(provider = "Provider"): Promise<string> {
   if (args.includes("--key-stdin")) {
     const value = readFileSync(0, "utf8").trim();
     if (!value) throw new Error("Empty upstream key on stdin");
     return value;
   }
   if (!stdin.isTTY) throw new Error("Use --key-stdin to supply upstream key via pipe");
-  const rl = createInterface({ input: stdin, output: stdout });
-  try { return (await rl.question("Provider API key (input may be visible): ")).trim(); }
-  finally { rl.close(); }
+  stdout.write(provider + " API key (paste, input hidden): ");
+  const wasRaw = stdin.isRaw;
+  stdin.setRawMode(true);
+  stdin.resume();
+  return new Promise((resolve, reject) => {
+    let value = "";
+    const finish = (error?: Error) => {
+      stdin.off("data", onData);
+      stdin.setRawMode(wasRaw ?? false);
+      stdin.pause();
+      stdout.write("\n");
+      if (error) reject(error);
+      else if (!value.trim()) reject(new Error("Empty upstream key"));
+      else resolve(value.trim());
+    };
+    const onData = (chunk: Buffer) => {
+      for (const char of chunk.toString("utf8")) {
+        if (char === "\u0003" || char === "\u0004") return finish(new Error("Key entry cancelled"));
+        if (char === "\r" || char === "\n") return finish();
+        if (char === "\u007f" || char === "\b") value = value.slice(0, -1);
+        else if (char >= " ") value += char;
+      }
+    };
+    stdin.on("data", onData);
+  });
 }
 function writeConfig(config: Config): void { saveJson(configPath(), config); }
 function parseTarget(s: string): Target {
@@ -61,15 +85,28 @@ async function main() {
     const [action, name] = args;
     if (action === "login" && name === "openai") { await loginChatGPT(); return; }
     if (action === "models") {
-      const account = requireArg(name, "Specify OAuth account");
-      if (loadConfig().accounts[account]?.auth !== "chatgpt-oauth") throw new Error("Models listing currently supports ChatGPT OAuth accounts");
-      const token = await getOAuthToken(account, loadSecrets());
-      const response = await fetch("https://api.openai.com/v1/models", {
-        headers: { authorization: "Bearer " + token }, signal: AbortSignal.timeout(20_000)
+      const account = requireArg(name, "Specify provider account");
+      const config = loadConfig(), secrets = loadSecrets();
+      if (config.accounts[account]?.auth === "chatgpt-oauth") {
+        const token = await getOAuthToken(account, secrets);
+        const response = await fetch("https://api.openai.com/v1/models", {
+          headers: { authorization: "Bearer " + token }, signal: AbortSignal.timeout(20_000)
+        });
+        if (!response.ok) throw new Error("Model listing unavailable (HTTP " + response.status + ")");
+        const body = await response.json() as { models?: Array<{ slug: string; display_name: string; visibility?: string }> };
+        console.log(JSON.stringify((body.models ?? []).filter(m => m.visibility === "list").map(m => ({ model: m.slug, name: m.display_name })), null, 2));
+        return;
+      }
+      const provider = config.accounts[account];
+      const key = secrets.accounts[account];
+      if (!provider || !key) throw new Error("Unknown provider or missing credentials: " + account);
+      const baseUrl = provider.baseUrl.replace(/\/+$/, "");
+      const response = await fetch(baseUrl + "/models", {
+        headers: { authorization: "Bearer " + key }, signal: AbortSignal.timeout(20_000)
       });
       if (!response.ok) throw new Error("Model listing unavailable (HTTP " + response.status + ")");
-      const body = await response.json() as { models?: Array<{ slug: string; display_name: string; visibility?: string }> };
-      console.log(JSON.stringify((body.models ?? []).filter(m => m.visibility === "list").map(m => ({ model: m.slug, name: m.display_name })), null, 2));
+      const body = await response.json() as { data?: Array<{ id: string }> };
+      console.log(JSON.stringify((body.data ?? []).map(m => m.id), null, 2));
       return;
     }
     if (action === "list") { console.log(JSON.stringify(Object.entries(loadConfig().accounts).map(([id, a]) => ({ id, kind: a.kind, baseUrl: a.baseUrl, configured: !!(loadSecrets().accounts[id] || loadSecrets().oauth?.[id]) })), null, 2)); return; }
@@ -78,16 +115,23 @@ async function main() {
       if (!/^[a-z0-9][a-z0-9_-]{0,40}$/i.test(id)) throw new Error("Invalid account name");
       const kind = (option("--kind") ?? "llm") as Family;
       if (!["llm", "decisions"].includes(kind)) throw new Error("--kind must be llm or decisions");
-      const baseUrl = option("--base-url") ?? (id === "opencode-go" ? "https://opencode.ai/zen/go/v1" : id === "openrouter" ? "https://openrouter.ai/api/v1" : "");
+      if (id === "vercel-decisions" && kind !== "decisions") throw new Error("vercel-decisions requires --kind decisions");
+      const baseUrl = option("--base-url") ?? ({
+        "opencode-go": "https://opencode.ai/zen/go/v1",
+        openrouter: "https://openrouter.ai/api/v1",
+        vercel: "https://ai-gateway.vercel.sh/v1",
+        "vercel-decisions": "https://ai-gateway.vercel.sh/v1",
+        gemini: "https://generativelanguage.googleapis.com/v1beta/openai/"
+      } as Record<string, string>)[id] ?? "";
       const decisionUrl = option("--decisions-url");
       if (!baseUrl && !decisionUrl) throw new Error("Pass --base-url or --decisions-url");
       const endpoints = decisionUrl ? { decisions: decisionUrl } : undefined;
-      const protocol = option("--protocol") ?? "systemone";
+      const protocol = option("--protocol") ?? (id === "vercel-decisions" ? "openai" : "systemone");
       if (kind === "decisions" && !["systemone", "openai"].includes(protocol)) throw new Error("Decision protocol must be systemone or openai");
       if (kind !== "decisions" && args.includes("--protocol")) throw new Error("--protocol is only valid for decision accounts");
       checkEndpoint(decisionUrl || baseUrl);
       if (baseUrl) checkEndpoint(baseUrl);
-      const key = await readKey();
+      const key = await readKey(id === "gemini" ? "Gemini" : "Provider");
       const config = loadConfig(), secrets = loadSecrets();
       const account: Account = { kind, baseUrl, ...(endpoints ? { endpoints } : {}),
         ...(kind === "decisions" ? { protocol: protocol as "systemone" | "openai" } : {}),
@@ -97,7 +141,7 @@ async function main() {
       secrets.accounts[id] = key;
       saveJson(secretsPath(), secrets);
       writeConfig(config);
-      console.log("Configured provider " + id + " (secret redacted)");
+      console.log(id === "gemini" ? "Gemini API key saved (secret redacted)" : "Configured provider " + id + " (secret redacted)");
       return;
     }
     if (action === "remove") {

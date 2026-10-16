@@ -27,7 +27,7 @@ type TokenResult = {
 };
 function record(x: unknown): x is Record<string, unknown> { return !!x && typeof x === "object" && !Array.isArray(x); }
 function fromB64(s: string): Buffer { return Buffer.from(s, "base64url"); }
-function verifiedIdentity(jwt: string, clientId: string, nonce: string, jwks: unknown): string {
+export function verifiedIdentity(jwt: string, clientId: string, nonce: string, jwks: unknown): string {
   const parts = jwt.split(".");
   if (parts.length !== 3) throw new Error("Invalid OIDC ID token");
   const hdr: unknown = JSON.parse(fromB64(parts[0]).toString("utf8"));
@@ -40,9 +40,16 @@ function verifiedIdentity(jwt: string, clientId: string, nonce: string, jwks: un
   const valid = verify(hdr.alg === "RS256" ? "RSA-SHA256" : "sha256",
     Buffer.from(parts[0] + "." + parts[1]),
     hdr.alg === "ES256" ? { key, dsaEncoding: "ieee-p1363" } : key, fromB64(parts[2]));
-  if (!valid || claims.iss !== authOrigin || claims.aud !== clientId || claims.nonce !== nonce ||
-      typeof claims.exp !== "number" || claims.exp <= Date.now() / 1000 ||
-      typeof claims.sub !== "string" || !claims.sub) throw new Error("OpenAI ID-token validation failed");
+  if (!valid) throw new Error("OpenAI ID-token signature validation failed");
+  if (claims.iss !== authOrigin) throw new Error("OpenAI ID-token issuer mismatch");
+  const audiences = typeof claims.aud === "string" ? [claims.aud] :
+    Array.isArray(claims.aud) && claims.aud.every(a => typeof a === "string") ? claims.aud : [];
+  if (!audiences.includes(clientId) || (claims.azp !== undefined && claims.azp !== clientId))
+    throw new Error("OpenAI ID-token audience mismatch");
+  if (claims.nonce !== nonce) throw new Error("OpenAI ID-token nonce mismatch");
+  if (typeof claims.exp !== "number" || claims.exp <= Date.now() / 1000 || typeof claims.iat !== "number")
+    throw new Error("OpenAI ID-token is expired or missing a valid issue time");
+  if (typeof claims.sub !== "string" || !claims.sub) throw new Error("OpenAI ID-token is missing a subject");
   return claims.sub;
 }
 async function exchange(data: Record<string, string>, fetcher: typeof fetch): Promise<TokenResult> {

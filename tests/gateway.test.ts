@@ -22,7 +22,7 @@ function config(): Config {
   };
 }
 async function run(configured: Config, mock: typeof fetch, fn: (url: string) => Promise<void>) {
-  const server = createGateway({ config: () => configured, secrets: () => ({ gatewayKey: "pag_test", accounts: { a: "a_secret", b: "b_secret", d: "d_secret" } }), fetcher: mock });
+  const server = createGateway({ config: () => configured, secrets: () => ({ gatewayKey: "pag_test", accounts: { a: "a_secret", b: "b_secret", d: "d_secret", vd: "vd_secret" } }), fetcher: mock });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const addr = server.address();
@@ -90,6 +90,39 @@ test("decisions: map predicate to noul, preserve provider probabilities", async 
     assert.equal(data.answers.team.choice, "ops");
     assert.equal(data.answers.severity.score, 1.25);
     assert.equal("confidence" in data.answers.urgent, false);
+  });
+});
+
+test("Vercel Decisions API: translate request and normalize typed answers", async () => {
+  const cfg = config();
+  cfg.accounts.vd = { kind: "decisions", baseUrl: "http://127.0.0.1:12/v1", protocol: "openai" };
+  cfg.routes.decision.targets = [{ account: "vd", model: "convaiinnovations/laya-free" }];
+  await run(cfg, async (url, init) => {
+    assert.equal(url, "http://127.0.0.1:12/v1/decisions");
+    assert.equal((init?.headers as Headers).get("authorization"), "Bearer vd_secret");
+    const request = JSON.parse(String(init?.body));
+    assert.equal(request.model, "convaiinnovations/laya-free");
+    assert.equal(request.input, "refund request");
+    assert.deepEqual(request.questions[0], { type: "predicate", name: "urgent", instructions: "Urgent?" });
+    assert.deepEqual(request.questions[1].choices, [{ value: "ops", description: "operations" }, { value: "sales", description: "sales" }]);
+    assert.deepEqual(request.questions[2].levels.map((level: { label: string }) => level.label), ["low", "med", "high"]);
+    return Response.json({ answers: [
+      { type: "predicate", name: "urgent", probability: 0.9 },
+      { type: "choice", name: "team", choice: "ops", confidence: 0.8, probabilities: [{ value: "ops", probability: 0.8 }, { value: "sales", probability: 0.2 }] },
+      { type: "score", name: "severity", score: 1.25, confidence: 0.7 }
+    ] });
+  }, async url => {
+    const r = await post(url, "/v1/decisions", { model: "decision", state: "refund request", questions: {
+      urgent: { type: "predicate", instructions: "Urgent?" },
+      team: { type: "choice", instructions: "Team?", choices: { ops: "operations", sales: "sales" } },
+      severity: { type: "score", instructions: "Rate", levels: ["low", "med", "high"] }
+    } });
+    assert.equal(r.status, 200);
+    const data = await r.json();
+    assert.equal(data.answers.urgent.probability, 0.9);
+    assert.equal(data.answers.team.choice, "ops");
+    assert.equal(data.answers.team.probabilities.ops, 0.8);
+    assert.equal(data.answers.severity.score, 1.25);
   });
 });
 
