@@ -1,0 +1,20 @@
+{
+  "name": "jev-core",
+  "version": "0.1.0",
+  "description": "Reusable decision API with provider fallback and a small ESM HTTP client",
+  "type": "module",
+  "exports": {
+    ".": "./src/client.mjs",
+    "./server": "./src/server.mjs",
+    "./decision": "./src/decision.mjs"
+  },
+  "bin": {
+    "jev-core": "./bin/jev-server.mjs"
+  },
+  "scripts": {
+    "start": "node bin/jev-server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT"
+}
