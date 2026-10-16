@@ -112,7 +112,7 @@ export function parseDecision(body: Dict): DecisionRequest {
   return Array.isArray(body.questions) ? parseOpenAI(body) : parseSystemOne(body);
 }
 export function canTranslate(req: DecisionRequest, protocol: "systemone" | "openai"): boolean {
-  return protocol === "openai" || typeof req.state === "string" || !Array.isArray(req.state);
+  return protocol === "openai" || req.format === "systemone" || !Array.isArray(req.state);
 }
 export function toSystemOne(req: DecisionRequest, model: string): Dict {
   if (!canTranslate(req, "systemone")) return error("Cannot represent native message-array input in System One");
@@ -136,8 +136,8 @@ export function toOpenAI(req: DecisionRequest, model: string): Dict {
       levels: (q.levels ?? []).map(label => ({ label, ...(q.levelDescriptions?.[label] ? { description: q.levelDescriptions[label] } : {}) })) };
   });
   // Native Decisions input must be a string or message array. Serialize arbitrary System One JSON state.
-  const input = typeof req.state === "string" || Array.isArray(req.state)
-    ? req.state : JSON.stringify(req.state);
+  const input = req.format === "openai" ? req.state
+    : typeof req.state === "string" ? req.state : JSON.stringify(req.state);
   return { model, input, questions };
 }
 export function toProviderDecision(req: DecisionRequest, model: string, protocol: "systemone" | "openai"): Dict {
