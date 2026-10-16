@@ -13,7 +13,7 @@ Minimal, self-hosted **AI API router**: one gateway URL, one API key, stable vir
 - Ordered fallback on 429, 5xx, network failures, cooldown and bounded timeout.
 - SSE streaming pass-through (fallback **before** response begins only), preservation of tool payloads.
 - Local `pag` CLI for provider keys, route selection, priority and health/config inspection.
-- OpenCode Go and OpenRouter API-key examples; generic compatible provider endpoints.
+- OpenCode Go and OpenRouter API-key examples, plus official ChatGPT open-source OAuth; generic compatible provider endpoints.
 
 ~~~bash
 npm install
@@ -25,6 +25,6 @@ npm start
 
 Use a stable alias `coding` with the generated PAG key at `http://127.0.0.1:4000/v1`. [Detailed steps and important provider restrictions](docs/quickstart.md).
 
-**Subscription caveat:** ChatGPT Plus is not a normal OpenAI Platform API key. Official subscription OAuth requires its own consent/registration and eligibility; it is **not yet implemented**. Do not pass ChatGPT web session tokens to PAG. OpenCode Go requires coding-agent use and should receive stable `x-opencode-session` values.
+**Subscription support:** `npm run pag -- auth login openai` starts OpenAI's official interactive open-source OAuth flow. Authorized accounts can be used for **streamed, unstored Responses API** requests only. Eligibility and actual quota are provider-controlled; no live account is used in CI. Do not pass ChatGPT web session tokens to PAG. OpenCode Go requires coding-agent use and should receive stable `x-opencode-session` values.
 
 See [#1 MVP](https://github.com/GitHubFoxy/Jev-core/issues/1) and [#3 future image/audio/video](https://github.com/GitHubFoxy/Jev-core/issues/3). Original Decision provider research is in [docs/jev-model-allowances.md](docs/jev-model-allowances.md).
