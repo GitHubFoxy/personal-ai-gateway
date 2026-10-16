@@ -1,0 +1,6 @@
+node_modules/
+.env
+.pag/
+coverage/
+*.db
+*.log
