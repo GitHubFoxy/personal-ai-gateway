@@ -1,0 +1,19 @@
+{
+  "name": "personal-ai-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.16" },
+  "bin": { "pag": "./src/cli.ts" },
+  "scripts": {
+    "start": "node --experimental-strip-types src/cli.ts serve",
+    "pag": "node --experimental-strip-types src/cli.ts",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.2"
+  }
+}
