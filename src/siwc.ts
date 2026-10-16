@@ -34,7 +34,7 @@ function verifiedIdentity(jwt: string, clientId: string, nonce: string, jwks: un
   const claims: unknown = JSON.parse(fromB64(parts[1]).toString("utf8"));
   if (!record(hdr) || !record(claims) || (hdr.alg !== "RS256" && hdr.alg !== "ES256")) throw new Error("Unsupported ID-token signature algorithm");
   if (!record(jwks) || !Array.isArray(jwks.keys)) throw new Error("Invalid OpenAI JWKS");
-  const keyData = jwks.keys.find(k => record(k) && k.kid === hdr.kid && k.alg === hdr.alg);
+  const keyData = jwks.keys.find(k => record(k) && k.kid === hdr.kid && (!k.alg || k.alg === hdr.alg));
   if (!keyData) throw new Error("ID-token signing key not found");
   const key = createPublicKey({ key: keyData, format: "jwk" });
   const valid = verify(hdr.alg === "RS256" ? "RSA-SHA256" : "sha256",
