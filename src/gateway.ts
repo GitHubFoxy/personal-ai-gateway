@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { loadConfig, loadSecrets, verifyKey, checkEndpoint, type Account, type Alias, type Config, type Endpoint, type Target } from "./config.ts";
 import { normalizeDecisions, parseDecision, toSystemOne } from "./decisions.ts";
+import { getOAuthToken } from "./siwc.ts";
 
 type Fetcher = typeof fetch;
 const retryable = new Set([429, 500, 502, 503, 504]);
@@ -40,6 +41,7 @@ function endpointFor(account: Account, endpoint: Endpoint): string | undefined {
 function validRoute(cfg: Config, alias: Alias, endpoint: Endpoint, target: Target): boolean {
   const a = cfg.accounts[target.account];
   if (!a || a.kind !== alias.type || (!cfg.fallback.allowPaid && a.paid)) return false;
+  if (a.auth === "chatgpt-oauth" && endpoint !== "responses") return false;
   const url = endpointFor(a, endpoint);
   if (!url) return false;
   try { checkEndpoint(url); } catch { return false; }
@@ -112,13 +114,20 @@ export function createGateway(options: { fetcher?: Fetcher; config?: () => Confi
         const routeId = target.account + ":" + target.model + ":" + endpoint;
         if ((cooldown.get(routeId) ?? 0) > Date.now()) continue;
         const account = cfg.accounts[target.account];
-        const token = secrets.accounts[target.account];
+        let token = secrets.accounts[target.account];
+        if (account.auth === "chatgpt-oauth") {
+          // Official ChatGPT subscription grants only support streamed, unstored Responses.
+          if (endpoint !== "responses" || body.stream !== true || body.store === true) continue;
+          try { token = await getOAuthToken(target.account, secrets, fetcher); }
+          catch { lastStatus = 503; continue; }
+        }
         if (!token) continue;
         const url = endpointFor(account, endpoint)!;
         attempts++;
         let response: Response;
         try {
-          const outbound = endpoint === "decisions" ? toSystemOne(decisions!, target.model) : { ...body, model: target.model };
+          const outbound = endpoint === "decisions" ? toSystemOne(decisions!, target.model) :
+            account.auth === "chatgpt-oauth" ? { ...body, model: target.model, store: false, stream: true } : { ...body, model: target.model };
           response = await fetcher(url, {
             method: "POST",
             headers: requestHeaders(account, token, req, body, secrets.gatewayKey),
