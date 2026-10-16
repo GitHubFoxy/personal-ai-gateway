@@ -26,6 +26,6 @@ test("CLI init, add credential, set route, reorder and persist", () => {
     assert.equal(cfg.routes.coding.targets[0].model, "gpt-6-luna");
     assert.equal(cfg.routes.coding.fallback, false);
     assert.equal(run(["doctor"]).status, 0);
-    assert.equal(run(["auth", "login", "openai"]).status, 1);
+    assert.match(run(["auth", "list"]).stdout, /opencode-go/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
