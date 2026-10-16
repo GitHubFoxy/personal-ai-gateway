@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createGateway } from "../src/gateway.ts";
 import { type Config } from "../src/config.ts";
-import { parseDecision, toOpenAI, toSystemOne, normalizeDecisions } from "../src/decisions.ts";
+import { parseDecision, toOpenAI, toSystemOne, canTranslate, normalizeDecisions } from "../src/decisions.ts";
 
 function mockConfig(): Config {
   return {
@@ -194,4 +194,16 @@ test("Missing answers trigger fallback; native message-array input skips incompa
     assert.equal(resp.status, 502);
     assert.equal(calls, 1);
   });
+});
+
+test("System One accepts JSON-array state but never sends it as native message objects", () => {
+  const request = parseDecision({ model: "decision", state: ["ticket A", "ticket B"],
+    questions: { urgent: { type: "predicate", instructions: "Urgent?" } } });
+  assert.equal(canTranslate(request, "systemone"), true);
+  assert.deepEqual(toSystemOne(request, "jev").state, ["ticket A", "ticket B"]);
+  assert.equal(toOpenAI(request, "gpt-6-luna").input, '["ticket A","ticket B"]');
+  const native = parseDecision({ model: "decision", input: [{ role: "user", content: "hello" }],
+    questions: [{ name: "urgent", type: "predicate", instructions: "Urgent?" }] });
+  assert.equal(canTranslate(native, "systemone"), false);
+  assert.equal(canTranslate(native, "openai"), true);
 });
