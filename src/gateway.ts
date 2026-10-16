@@ -151,19 +151,56 @@ export function createGateway(options: { fetcher?: Fetcher; config?: () => Confi
           continue;
         }
         if (endpoint !== "decisions" && body.stream === true) {
+          if (!response.body) { lastStatus = 502; continue; }
+          const reader = response.body.getReader();
+          const first: Uint8Array[] = [];
+          let prefix = "";
+          let prematureFailure = false;
+          try {
+            // Some subscription quotas return HTTP 200 followed by response.failed in SSE.
+            // Withhold *initial* control events until we can identify an early failure.
+            for (let i = 0; i < 8; i++) {
+              const event = await reader.read();
+              if (event.done) break;
+              first.push(event.value);
+              prefix += new TextDecoder().decode(event.value);
+              if (/response\.failed|subscription_sharing_usage_limit_exceeded|subscription_sharing_usage_unavailable/.test(prefix)
+                  && !/response\.output_text\.delta|response\.output_item\.added/.test(prefix)) {
+                prematureFailure = true; break;
+              }
+              if (/response\.output_text\.delta|response\.output_item\.added|response\.completed|"choices"\s*:|\[DONE\]/.test(prefix)
+                  || prefix.length > 16384) break;
+            }
+          } catch { if (run.expired()) lastStatus = 504; else lastStatus = 502; continue; }
+          if (prematureFailure) {
+            cooldown.set(routeId, Date.now() + Math.min(cfg.fallback.cooldownMs || 60000, 600000));
+            await reader.cancel().catch(() => {});
+            lastStatus = 503;
+            continue;
+          }
+          if (!first.length) { lastStatus = 502; continue; }
           res.writeHead(200, {
             "content-type": response.headers.get("content-type") || "text/event-stream",
             "cache-control": "no-cache",
             "x-pag-provider": target.account,
             "x-pag-model": target.model
           });
+          const write = async (chunk: Uint8Array): Promise<void> => {
+            if (!res.write(chunk)) await new Promise<void>(resolve => {
+              const finish = () => { res.off("drain", finish); res.off("close", finish); resolve(); };
+              res.once("drain", finish);
+              res.once("close", finish);
+            });
+          };
           try {
-            if (!response.body) throw new Error("Missing upstream response stream");
-            for await (const chunk of response.body) {
-              if (run.signal.aborted) break;
-              if (!res.write(chunk)) await new Promise<void>(resolve => res.once("drain", resolve));
+            for (const chunk of first) await write(chunk);
+            while (!run.signal.aborted) {
+              const next = await reader.read();
+              if (next.done) break;
+              await write(next.value);
             }
-          } catch { /* Do not attempt fallback after stream has started. */ }
+          } catch { /* Midstream failures cannot be safely replayed to another provider. */ }
+          finally { reader.releaseLock(); }
           if (!res.writableEnded) res.end();
           return;
         }
