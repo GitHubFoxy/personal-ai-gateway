@@ -27,7 +27,7 @@ const requireName = (name: string): void => {
 };
 function nonEmpty(s: unknown, label: string): string {
   if (typeof s !== "string" || !s.trim() || s.length > 20_000) error("Invalid " + label);
-  return s;
+  return s as string;
 }
 function choices(value: unknown): Record<string, string> {
   if (!record(value)) return error("Choice question requires an options object");
