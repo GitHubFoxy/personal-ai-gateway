@@ -4,7 +4,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { checkEndpoint, configPath, home, initialize, loadConfig, loadSecrets, saveJson, secretsPath, type Account, type Config, type Family, type Target } from "./config.ts";
 import { startGateway } from "./gateway.ts";
-import { loginChatGPT } from "./siwc.ts";
+import { loginChatGPT, getOAuthToken } from "./siwc.ts";
 
 const [command, ...args] = process.argv.slice(2);
 const help = `Personal AI Gateway (PAG)
@@ -12,6 +12,7 @@ const help = `Personal AI Gateway (PAG)
   pag init
   pag serve
   pag auth add NAME --kind llm|decisions --base-url URL [--session opencode] [--paid] [--key-stdin]
+  pag auth models chatgpt           (list authorized ChatGPT model slugs)
   pag auth list
   pag auth remove NAME
   pag auth login openai           (official ChatGPT open-source OAuth flow)
@@ -59,6 +60,18 @@ async function main() {
   if (command === "auth") {
     const [action, name] = args;
     if (action === "login" && name === "openai") { await loginChatGPT(); return; }
+    if (action === "models") {
+      const account = requireArg(name, "Specify OAuth account");
+      if (loadConfig().accounts[account]?.auth !== "chatgpt-oauth") throw new Error("Models listing currently supports ChatGPT OAuth accounts");
+      const token = await getOAuthToken(account, loadSecrets());
+      const response = await fetch("https://api.openai.com/v1/models", {
+        headers: { authorization: "Bearer " + token }, signal: AbortSignal.timeout(20_000)
+      });
+      if (!response.ok) throw new Error("Model listing unavailable (HTTP " + response.status + ")");
+      const body = await response.json() as { models?: Array<{ slug: string; display_name: string; visibility?: string }> };
+      console.log(JSON.stringify((body.models ?? []).filter(m => m.visibility === "list").map(m => ({ model: m.slug, name: m.display_name })), null, 2));
+      return;
+    }
     if (action === "list") { console.log(JSON.stringify(Object.entries(loadConfig().accounts).map(([id, a]) => ({ id, kind: a.kind, baseUrl: a.baseUrl, configured: !!(loadSecrets().accounts[id] || loadSecrets().oauth?.[id]) })), null, 2)); return; }
     if (action === "add") {
       const id = requireArg(name, "Missing account name");
