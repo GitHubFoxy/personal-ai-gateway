@@ -72,6 +72,20 @@ Decision models use System One-style `state` + `questions`. PAG translates publi
 
 `pag init`, `pag serve`, `pag auth add/list/remove`, `pag route set/show/list/promote/fallback`, `pag status`, `pag doctor`. With npm scripts: `npm run pag -- ...`. Config is JSON in `~/.config/pag/config.json` (override with `PAG_HOME`), upstream tokens in private mode-0600 `secrets.json`. `PAG_HOST`/`PAG_PORT` override the bind address and port. Changes to routes affect **new** requests immediately.
 
+## Docker
+
+For a persistent local container (exposed to localhost only):
+
+~~~bash
+docker compose build
+docker compose run --rm pag node --experimental-strip-types src/cli.ts init
+docker compose run --rm -T pag node --experimental-strip-types src/cli.ts auth add opencode-go --key-stdin < opencode-key.txt
+docker compose run --rm pag node --experimental-strip-types src/cli.ts route set coding llm opencode-go:gpt-6-luna
+docker compose up -d
+~~~
+
+The `pag-state` volume contains **private API and OAuth credentials**; protect it. For ChatGPT's interactive OAuth login, running the CLI on the machine with the browser is simpler than a remote Docker container because the callback must use localhost.
+
 ## Limits and deliberate omissions
 
 - The app exposes `/v1/responses`, `/v1/chat/completions`, `/v1/decisions`, `/v1/models` and `/healthz`. Existing OpenAI-compatible clients can use the PAG base URL with documented endpoint restrictions.
