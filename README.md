@@ -7,7 +7,7 @@ Minimal, self-hosted **AI API router**: one gateway URL, one API key, stable vir
 ### Features (v0.1)
 
 - `POST /v1/responses` — forwards OpenAI Responses-compatible requests to a compatible model pool.
-- `POST /v1/chat/completions` — forwards compatible chat completions requests.
+- `POST /v1/chat/completions` — forwards compatible chat completions requests; translates non-streaming text requests for ChatGPT OAuth.
 - `POST /v1/decisions` — accepts both System One `state + questions{}` and OpenAI-native `input + questions[]`; translates and validates provider responses.
 - `GET /v1/models` — configured virtual aliases.
 - Ordered fallback on 429, 5xx, network failures, cooldown and bounded timeout.
@@ -25,6 +25,6 @@ npm start
 
 Use a stable alias `coding` with the generated PAG key at `http://127.0.0.1:4000/v1`. [Detailed steps and important provider restrictions](docs/quickstart.md).
 
-**Subscription support:** `npm run pag -- auth login openai` starts OpenAI's official interactive open-source OAuth flow. Authorized accounts can be used for **streamed, unstored Responses API** requests only. Eligibility and actual quota are provider-controlled; no live account is used in CI. Do not pass ChatGPT web session tokens to PAG. OpenCode Go requires coding-agent use and should receive stable `x-opencode-session` values.
+**Subscription support:** `npm run pag -- auth login openai` starts OpenAI's official interactive open-source OAuth flow. PAG uses **streamed, unstored Responses API** upstream and translates supported non-streaming text Chat Completions requests. Eligibility and actual quota are provider-controlled; no live account is used in CI. Do not pass ChatGPT web session tokens to PAG. OpenCode Go requires coding-agent use and should receive stable `x-opencode-session` values.
 
 See [#1 MVP](https://github.com/GitHubFoxy/Jev-core/issues/1) and [#3 future image/audio/video](https://github.com/GitHubFoxy/Jev-core/issues/3). Original Decision provider research is in [docs/jev-model-allowances.md](docs/jev-model-allowances.md).

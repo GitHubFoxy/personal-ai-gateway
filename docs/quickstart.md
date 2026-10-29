@@ -74,7 +74,7 @@ npm run pag -- auth models chatgpt
 npm run pag -- route set coding llm chatgpt:<model-from-account-catalog> opencode-go:gpt-6-luna
 ~~~
 
-For requests that may route through the ChatGPT subscription, clients **must use POST /v1/responses with `stream:true` and `store:false`**. This is the official plan-usage contract. Non-streaming and Chat Completions requests are routed only to other compatible accounts. PAG does not bypass per-plan/app limits. OAuth refresh tokens are stored in the local mode-0600 credential file; never copy it into a public repository. See [OpenAI's official OSS instructions](https://developers.openai.com/siwc/token-sharing-open-source).
+ChatGPT OAuth uses streamed, unstored Responses upstream. Clients can use `POST /v1/responses` with `stream:true` and `store:false`, or `POST /v1/chat/completions` for non-streaming text messages. The chat adapter supports `max_tokens`, `response_format: {"type":"json_object"}`, and `reasoning.effort`; streaming chat, tools, images and other options require a native chat provider. Unsupported options are not silently discarded. PAG does not bypass per-plan/app limits. OAuth refresh tokens are stored in the local mode-0600 credential file; never copy it into a public repository. See [OpenAI's official OSS instructions](https://developers.openai.com/siwc/token-sharing-open-source).
 
 **Limitation:** fallback works before a streamed response starts, not as an invisible continuation of an already emitted stream. Some ChatGPT quota errors may arrive as an SSE failure event after a stream starts; in that case PAG cannot safely replay that stream to another model. Check `response.failed` and retry as a fresh request if appropriate.
 
@@ -88,7 +88,7 @@ npm run pag -- route fallback coding on
 npm run pag -- status
 ~~~
 
-**Important:** A fallback target must serve the *same endpoint* and support the requested features. Responses and Chat Completions are deliberately kept separate; PAG does not automatically and lossily translate between them. OpenCode Go models may support only one of these endpoints. Use an appropriate alias/endpoint for each model. Keep a stable `x-opencode-session` on coding-agent conversations and respect the provider's API usage policies.
+**Important:** A fallback target must support the requested features. The ChatGPT OAuth adapter supports only the chat subset described above; other providers must serve the requested endpoint directly. OpenCode Go models may support only one endpoint. Keep a stable `x-opencode-session` on coding-agent conversations and respect the provider's API usage policies.
 
 ## Decisions
 
@@ -129,4 +129,4 @@ The `pag-state` volume contains **private API and OAuth credentials**; protect i
 - ChatGPT OAuth uses the official open-source dynamic-client PKCE login. The user must authorize plan usage, and the account must be eligible; live sign-in has not been validated in automated CI. Subscription traffic is restricted to streamed, unstored Responses.
 - API-key providers work today; no provider calls are included in CI. This is not a general-purpose multi-user public gateway.
 - Use localhost by default; if exposed remotely, terminate HTTPS at a trusted reverse proxy, secure PAG_HOME and keep the gateway API key private.
-- YAML, UI, video/audio/images, and model-protocol translation are intentionally deferred.
+- YAML, UI, video/audio/images, and general-purpose model-protocol translation are intentionally deferred.
