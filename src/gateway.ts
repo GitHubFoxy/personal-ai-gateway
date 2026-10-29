@@ -6,7 +6,7 @@ import { getOAuthToken } from "./siwc.ts";
 import { chatRequest, chatResponse } from "./chatgpt-chat.ts";
 
 type Fetcher = typeof fetch;
-const retryable = new Set([429, 500, 502, 503, 504]);
+const retryable = new Set([401, 402, 403, 404, 408, 429, 500, 502, 503, 504]);
 const cooldown = new Map<string, number>();
 const maxBodyBytes = 2 * 1024 * 1024;
 function json(res: ServerResponse, code: number, body: unknown): void {
@@ -114,7 +114,7 @@ export function createGateway(options: { fetcher?: Fetcher; config?: () => Confi
       for (const target of targets) {
         if (attempts >= Math.min(Math.max(cfg.fallback.maxAttempts || 1, 1), 10) || run.signal.aborted) break;
         const routeId = target.account + ":" + target.model + ":" + endpoint;
-        if ((cooldown.get(routeId) ?? 0) > Date.now()) continue;
+        if ((cooldown.get(routeId) ?? 0) > Date.now()) { if (!attempts) lastStatus = 503; continue; }
         const account = cfg.accounts[target.account];
         const convertedChat = endpoint === "chat" && account.auth === "chatgpt-oauth" ? chatRequest(body, target.model) : undefined;
         if (endpoint === "chat" && account.auth === "chatgpt-oauth" && !convertedChat) { unsupportedChat = true; continue; }
