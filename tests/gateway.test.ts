@@ -22,7 +22,7 @@ function config(): Config {
   };
 }
 async function run(configured: Config, mock: typeof fetch, fn: (url: string) => Promise<void>) {
-  const server = createGateway({ config: () => configured, secrets: () => ({ gatewayKey: "pag_test", accounts: { a: "a_secret", b: "b_secret", d: "d_secret", vd: "vd_secret" } }), fetcher: mock });
+  const server = createGateway({ config: () => configured, secrets: () => ({ gatewayKey: "pag_test", accounts: { a: "a_secret", b: "b_secret", d: "d_secret", vd: "vd_secret" }, oauth: { a: { clientId: "", accessToken: "oauth_token", refreshToken: "", idToken: "", expiresAt: Date.now() + 3600000, subject: "", scope: "" } } }), fetcher: mock });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const addr = server.address();
@@ -32,6 +32,27 @@ async function run(configured: Config, mock: typeof fetch, fn: (url: string) => 
 function post(url: string, path: string, body: unknown, token = "pag_test") {
   return fetch(url + path, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify(body) });
 }
+
+test("ChatGPT OAuth accepts string and list Responses input", async () => {
+  const cfg = config();
+  cfg.accounts.a.auth = "chatgpt-oauth";
+  cfg.routes.coding.targets = [cfg.routes.coding.targets[0]];
+  const inputs = ["hello", [{ role: "user", content: "hello" }]];
+  let calls = 0;
+  await run(cfg, async (_url, init) => {
+    const outbound = JSON.parse(String(init?.body));
+    assert.deepEqual(outbound.input, [{ role: "user", content: "hello" }]);
+    calls++;
+    return new Response('data: {"type":"response.completed"}\n\n', { headers: { "content-type": "text/event-stream" } });
+  }, async url => {
+    for (const input of inputs) {
+      const response = await post(url, "/v1/responses", { model: "coding", input, stream: true });
+      assert.equal(response.status, 200);
+      await response.text();
+    }
+    assert.equal(calls, 2);
+  });
+});
 
 test("authentication, models, stable alias and upstream model", async () => {
   const cfg = config();

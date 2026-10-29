@@ -128,7 +128,7 @@ export function createGateway(options: { fetcher?: Fetcher; config?: () => Confi
         let response: Response;
         try {
           const outbound = endpoint === "decisions" ? toProviderDecision(decisions!, target.model, account.protocol ?? "systemone") :
-            account.auth === "chatgpt-oauth" ? { ...body, model: target.model, store: false, stream: true } : { ...body, model: target.model };
+            account.auth === "chatgpt-oauth" ? { ...body, ...(typeof body.input === "string" ? { input: [{ role: "user", content: body.input }] } : {}), model: target.model, store: false, stream: true } : { ...body, model: target.model };
           response = await fetcher(url, {
             method: "POST",
             headers: requestHeaders(account, token, req, body, secrets.gatewayKey),
