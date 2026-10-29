@@ -133,6 +133,37 @@ test("fallback from upstream 429 to backup, then manual priority change", async 
   });
 });
 
+test("upstream account and model failures fall back to the next target", async () => {
+  for (const status of [401, 402, 403, 404, 408]) {
+    const cfg = config();
+    const calls: string[] = [];
+    await run(cfg, async (_url, init) => {
+      const model = JSON.parse(String(init?.body)).model;
+      calls.push(model);
+      if (calls.length === 1) return new Response("unavailable", { status });
+      return Response.json({ id: "ok", model });
+    }, async url => {
+      const response = await post(url, "/v1/chat/completions", { model: "coding", messages: [{ role: "user", content: "hello" }] });
+      assert.equal(response.status, 200, `upstream ${status}`);
+      assert.equal(response.headers.get("x-pag-provider"), "b");
+      assert.equal(calls.length, 2);
+    });
+  }
+});
+
+test("rate limited routes remain unavailable during cooldown", async () => {
+  const cfg = config();
+  cfg.routes.coding.targets = [cfg.routes.coding.targets[0]];
+  cfg.fallback.cooldownMs = 60000;
+  let calls = 0;
+  await run(cfg, async () => { calls++; return new Response("rate limited", { status: 429 }); }, async url => {
+    const request = { model: "coding", messages: [{ role: "user", content: "hello" }] };
+    assert.equal((await post(url, "/v1/chat/completions", request)).status, 503);
+    assert.equal((await post(url, "/v1/chat/completions", request)).status, 503);
+    assert.equal(calls, 1);
+  });
+});
+
 test("decisions: map predicate to noul, preserve provider probabilities", async () => {
   const cfg = config();
   await run(cfg, async (_url, init) => {

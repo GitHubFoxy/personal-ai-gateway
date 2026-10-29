@@ -124,7 +124,7 @@ The `pag-state` volume contains **private API and OAuth credentials**; protect i
 ## Limits and deliberate omissions
 
 - The app exposes `/v1/responses`, `/v1/chat/completions`, `/v1/decisions`, `/v1/models` and `/healthz`. Existing OpenAI-compatible clients can use the PAG base URL with documented endpoint restrictions.
-- Model pool is ordered. Fallback occurs on upstream 429, transient 5xx, pre-response network errors or invalid nonstream JSON. It cannot resume an interrupted stream.
+- Model pool is ordered. Fallback occurs on upstream authentication, credit, model-not-found, timeout, rate-limit or transient server errors, pre-response network errors, or invalid nonstream JSON. It cannot resume an interrupted stream. Configure only acceptable backup targets: PAG does not discover prices or models automatically.
 - Provider quotas are not probed proactively; `status` shows configuration, not an invented token balance. Cooldowns are per-process and not durable. No usage billing/quota database.
 - ChatGPT OAuth uses the official open-source dynamic-client PKCE login. The user must authorize plan usage, and the account must be eligible; live sign-in has not been validated in automated CI. Subscription traffic is restricted to streamed, unstored Responses.
 - API-key providers work today; no provider calls are included in CI. This is not a general-purpose multi-user public gateway.
