@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { loadConfig, loadSecrets, verifyKey, checkEndpoint, type Account, type Alias, type Config, type Endpoint, type Target } from "./config.ts";
 import { canTranslate, normalizeDecisions, parseDecision, toProviderDecision } from "./decisions.ts";
 import { getOAuthToken } from "./siwc.ts";
+import { chatRequest, chatResponse } from "./chatgpt-chat.ts";
 
 type Fetcher = typeof fetch;
 const retryable = new Set([429, 500, 502, 503, 504]);
@@ -41,8 +42,8 @@ function endpointFor(account: Account, endpoint: Endpoint): string | undefined {
 function validRoute(cfg: Config, alias: Alias, endpoint: Endpoint, target: Target): boolean {
   const a = cfg.accounts[target.account];
   if (!a || a.kind !== alias.type || (!cfg.fallback.allowPaid && a.paid)) return false;
-  if (a.auth === "chatgpt-oauth" && endpoint !== "responses") return false;
-  const url = endpointFor(a, endpoint);
+  if (a.auth === "chatgpt-oauth" && endpoint === "decisions") return false;
+  const url = endpointFor(a, a.auth === "chatgpt-oauth" && endpoint === "chat" ? "responses" : endpoint);
   if (!url) return false;
   try { checkEndpoint(url); } catch { return false; }
   return true;
@@ -109,26 +110,29 @@ export function createGateway(options: { fetcher?: Fetcher; config?: () => Confi
     let lastStatus = 502;
     try {
       let attempts = 0;
+      let unsupportedChat = false;
       for (const target of targets) {
         if (attempts >= Math.min(Math.max(cfg.fallback.maxAttempts || 1, 1), 10) || run.signal.aborted) break;
         const routeId = target.account + ":" + target.model + ":" + endpoint;
         if ((cooldown.get(routeId) ?? 0) > Date.now()) continue;
         const account = cfg.accounts[target.account];
+        const convertedChat = endpoint === "chat" && account.auth === "chatgpt-oauth" ? chatRequest(body, target.model) : undefined;
+        if (endpoint === "chat" && account.auth === "chatgpt-oauth" && !convertedChat) { unsupportedChat = true; continue; }
         if (endpoint === "decisions" && !canTranslate(decisions!, account.protocol ?? "systemone")) continue;
         let token = secrets.accounts[target.account];
         if (account.auth === "chatgpt-oauth") {
           // Official ChatGPT subscription grants only support streamed, unstored Responses.
-          if (endpoint !== "responses" || body.stream !== true || body.store === true) continue;
+          if (!convertedChat && (endpoint !== "responses" || body.stream !== true || body.store === true)) continue;
           try { token = await getOAuthToken(target.account, secrets, fetcher); }
           catch { lastStatus = 503; continue; }
         }
         if (!token) continue;
-        const url = endpointFor(account, endpoint)!;
+        const url = endpointFor(account, convertedChat ? "responses" : endpoint)!;
         attempts++;
         let response: Response;
         try {
-          const outbound = endpoint === "decisions" ? toProviderDecision(decisions!, target.model, account.protocol ?? "systemone") :
-            account.auth === "chatgpt-oauth" ? { ...body, model: target.model, store: false, stream: true } : { ...body, model: target.model };
+          const outbound = convertedChat ?? (endpoint === "decisions" ? toProviderDecision(decisions!, target.model, account.protocol ?? "systemone") :
+            account.auth === "chatgpt-oauth" ? { ...body, ...(typeof body.input === "string" ? { input: [{ role: "user", content: body.input }] } : {}), model: target.model, store: false, stream: true } : { ...body, model: target.model });
           response = await fetcher(url, {
             method: "POST",
             headers: requestHeaders(account, token, req, body, secrets.gatewayKey),
@@ -206,7 +210,7 @@ export function createGateway(options: { fetcher?: Fetcher; config?: () => Confi
           return;
         }
         try {
-          const data: unknown = await response.json();
+          const data: unknown = convertedChat ? await chatResponse(response, aliasName) : await response.json();
           if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid upstream JSON");
           const output: Record<string, unknown> = endpoint === "decisions" ?
             normalizeDecisions(data, decisions!, aliasName) : { ...data as Record<string, unknown>, model: aliasName };
@@ -219,7 +223,7 @@ export function createGateway(options: { fetcher?: Fetcher; config?: () => Confi
         }
       }
       if (run.signal.aborted && !run.expired()) return;
-      return error(res, run.expired() ? 504 : lastStatus, run.expired() ? "Gateway deadline exceeded" : "No upstream route completed successfully", requestId);
+      return error(res, run.expired() ? 504 : unsupportedChat && !attempts ? 422 : lastStatus, run.expired() ? "Gateway deadline exceeded" : unsupportedChat && !attempts ? "ChatGPT OAuth supports only non-streaming text chat requests with supported options" : "No upstream route completed successfully", requestId);
     } finally { run.cleanup(); }
   });
 }

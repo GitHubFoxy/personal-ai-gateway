@@ -22,7 +22,7 @@ function config(): Config {
   };
 }
 async function run(configured: Config, mock: typeof fetch, fn: (url: string) => Promise<void>) {
-  const server = createGateway({ config: () => configured, secrets: () => ({ gatewayKey: "pag_test", accounts: { a: "a_secret", b: "b_secret", d: "d_secret", vd: "vd_secret" } }), fetcher: mock });
+  const server = createGateway({ config: () => configured, secrets: () => ({ gatewayKey: "pag_test", accounts: { a: "a_secret", b: "b_secret", d: "d_secret", vd: "vd_secret" }, oauth: { a: { clientId: "", accessToken: "oauth_token", refreshToken: "", idToken: "", expiresAt: Date.now() + 3600000, subject: "", scope: "" } } }), fetcher: mock });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const addr = server.address();
@@ -32,6 +32,72 @@ async function run(configured: Config, mock: typeof fetch, fn: (url: string) => 
 function post(url: string, path: string, body: unknown, token = "pag_test") {
   return fetch(url + path, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify(body) });
 }
+
+test("ChatGPT OAuth accepts string and list Responses input", async () => {
+  const cfg = config();
+  cfg.accounts.a.auth = "chatgpt-oauth";
+  cfg.routes.coding.targets = [cfg.routes.coding.targets[0]];
+  const inputs = ["hello", [{ role: "user", content: "hello" }]];
+  let calls = 0;
+  await run(cfg, async (_url, init) => {
+    const outbound = JSON.parse(String(init?.body));
+    assert.deepEqual(outbound.input, [{ role: "user", content: "hello" }]);
+    calls++;
+    return new Response('data: {"type":"response.completed"}\n\n', { headers: { "content-type": "text/event-stream" } });
+  }, async url => {
+    for (const input of inputs) {
+      const response = await post(url, "/v1/responses", { model: "coding", input, stream: true });
+      assert.equal(response.status, 200);
+      await response.text();
+    }
+    assert.equal(calls, 2);
+  });
+});
+
+test("Chat Completions text request uses ChatGPT OAuth Responses", async () => {
+  const cfg = config();
+  cfg.accounts.a.auth = "chatgpt-oauth";
+  cfg.accounts.a.endpoints = { responses: "http://127.0.0.1:9/responses" };
+  cfg.routes.coding.targets = [cfg.routes.coding.targets[0]];
+  await run(cfg, async (url, init) => {
+    assert.equal(url, cfg.accounts.a.endpoints!.responses);
+    const body = JSON.parse(String(init?.body));
+    assert.deepEqual(body.input, [{ role: "developer", content: "Return JSON" }, { role: "user", content: "hello" }]);
+    assert.deepEqual(body.text.format, { type: "json_object" });
+    assert.equal(body.stream, true);
+    assert.equal(body.store, false);
+    return new Response('data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\\"text\\":\\"hello\\"}"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}\n\n', { headers: { "content-type": "text/event-stream" } });
+  }, async url => {
+    const response = await post(url, "/v1/chat/completions", { model: "coding", messages: [{ role: "system", content: "Return JSON" }, { role: "user", content: "hello" }], response_format: { type: "json_object" }, reasoning: { effort: "low" }, max_tokens: 1024 });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.choices[0].message.content, '{"text":"hello"}');
+    assert.equal(result.model, "coding");
+    assert.equal(result.usage.total_tokens, 5);
+  });
+});
+
+test("unsupported ChatGPT OAuth chat options fail without contacting upstream", async () => {
+  const cfg = config();
+  cfg.accounts.a.auth = "chatgpt-oauth";
+  cfg.routes.coding.targets = [cfg.routes.coding.targets[0]];
+  await run(cfg, async () => { throw new Error("unexpected upstream request"); }, async url => {
+    for (const extra of [{ stream: true }, { tools: [] }, { response_format: "json_object" }]) {
+      const response = await post(url, "/v1/chat/completions", { model: "coding", messages: [{ role: "user", content: "hello" }], ...extra });
+      assert.equal(response.status, 422);
+    }
+  });
+});
+
+test("ChatGPT OAuth failed event does not become a successful chat completion", async () => {
+  const cfg = config();
+  cfg.accounts.a.auth = "chatgpt-oauth";
+  cfg.routes.coding.targets = [cfg.routes.coding.targets[0]];
+  await run(cfg, async () => new Response('data: {"type":"response.failed"}\n\n'), async url => {
+    const response = await post(url, "/v1/chat/completions", { model: "coding", messages: [{ role: "user", content: "hello" }] });
+    assert.equal(response.status, 502);
+  });
+});
 
 test("authentication, models, stable alias and upstream model", async () => {
   const cfg = config();
