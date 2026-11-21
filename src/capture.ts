@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from "node:http";
 
-const SECRET_HEADERS = new Set(["authorization", "proxy-authorization", "x-api-key", "cookie", "set-cookie"]);
+const SECRET_HEADERS = new Set(["authorization", "proxy-authorization", "x-api-key", "x-goog-api-key", "cookie", "set-cookie"]);
 const SESSION_HEADERS = ["x-claude-code-session-id", "x-opencode-session", "session_id", "x-session-id", "x-codex-session-id"];
 
 /** Headers as JSON with credentials masked. Bodies are stored as-is. */

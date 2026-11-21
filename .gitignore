@@ -4,3 +4,7 @@ node_modules/
 coverage/
 *.db
 *.log
+/cpa/
+/clickhouse/
+/front/
+/bin/
